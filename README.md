@@ -38,70 +38,56 @@ The DNS update requests are retried in the background (XXX: currently blocks for
 	Arguments:
 	  Name:                                                 DNS Name to update
 
+## Docker
 
-## Example
+Use the GitHub Container Registry image built by GitHub Actions with `host` network mode:
 
-    # Using a generated TSIG key:
-    # TSIG_SECRET=$(python -c 'import os; print os.urandom(32).encode("base64")')
+    export TSIG_SECRET=...
+    docker run --rm --net=host -e TSIG_SECRET ghcr.io/qmsk/go-nsupdate:master --interface=eth0 --tsig-algorithm=hmac-sha256 --watch yzzrt.dyn.example.net
 
-    TSIG_SECRET=... go-nsupdate --interface=vlan-wan --tsig-algorithm=hmac-sha256 yzzrt.dyn.qmsk.net --watch
-    2016/06/19 21:29:33 discover server=zovoweix.qmsk.net.
-    2016/06/19 21:29:33 using TSIG: yzzrt.dyn.qmsk.net (algo=hmac-sha256.)
-    2016/06/19 21:29:33 AddrSet iface=vlan-wan: up 2001:14ba:400:0:7:1449:a833:f11f
-    2016/06/19 21:29:33 update...
-    2016/06/19 21:29:33 update query:
-    ;; opcode: UPDATE, status: NOERROR, id: 61616
-    ;; flags:; QUERY: 1, ANSWER: 0, AUTHORITY: 2, ADDITIONAL: 1
+See https://github.com/qmsk/go-nsupdate/pkgs/container/go-nsupdate
 
-    ;; QUESTION SECTION:
-    ;dyn.qmsk.net.  IN       SOA
+## Bind9
 
-    ;; AUTHORITY SECTION:
-    yzzrt.dyn.qmsk.net.     0       ANY     ANY
-    yzzrt.dyn.qmsk.net.     60      IN      AAAA    2001:14ba:400:0:7:1449:a833:f11f
+Initialize the dynamic zonefile with `SOA` and `NS` records:
 
-    ;; ADDITIONAL SECTION:
+```
+$TTL 60
 
-    ;; TSIG PSEUDOSECTION:
-    yzzrt.dyn.qmsk.net.     0       ANY     TSIG     hmac-sha256. 20160619182933 300 0  61616 0 0
-    2016/06/19 21:29:33 update answer:
-    ;; opcode: UPDATE, status: NOERROR, id: 61616
-    ;; flags: qr; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1
+@                              SOA   ns0.example.net. hostmaster.example.net. 0 86400 900 1209600 60
+@                              NS    ns0.example.net.
+```
 
-    ;; QUESTION SECTION:
-    ;dyn.qmsk.net.  IN       SOA
+Generate the TSIG key as a base64-encoded random string:
 
-    ;; ADDITIONAL SECTION:
+    pwgen -s 48 1 | base64
 
-    ;; TSIG PSEUDOSECTION:
-    yzzrt.dyn.qmsk.net.     0       ANY     TSIG     hmac-sha256. 20160619182933 300 32 E083433B2893B2036B24549E3537C6E17B858019B9862DC2EB9EDFB959D03232 61616 0 0
-    2016/06/19 21:46:34 AddrSet iface=vlan-wan: up 213.243.178.191
-    2016/06/19 21:46:34 addrs update...
-    2016/06/19 21:46:34 update...
-    2016/06/19 21:46:34 update query:
-    ;; opcode: UPDATE, status: NOERROR, id: 30973
-    ;; flags:; QUERY: 1, ANSWER: 0, AUTHORITY: 3, ADDITIONAL: 1
 
-    ;; QUESTION SECTION:
-    ;dyn.qmsk.net.  IN       SOA
+Configure a master zone with a dynamic update policy and associated TSIG keys matching the records to update:
 
-    ;; AUTHORITY SECTION:
-    yzzrt.dyn.qmsk.net.     0       ANY     ANY
-    yzzrt.dyn.qmsk.net.     60      IN      AAAA    2001:14ba:400:0:7:1449:a833:f11f
-    yzzrt.dyn.qmsk.net.     60      IN      A       213.243.178.191
+```
+key "foobar.dyn.example.net" {
+  algorithm hmac-sha256;
+  secret "...";
+};
 
-    ;; ADDITIONAL SECTION:
+zone "dyn.example.net" {
+  type master;
+  file "/var/lib/bind/zones/dyn.example.net";
 
-    ;; TSIG PSEUDOSECTION:
-    yzzrt.dyn.qmsk.net.     0       ANY     TSIG     hmac-sha256. 20160619184634 300 0  30973 0 0
-    2016/06/19 21:46:35 update answer:
-    ;; opcode: UPDATE, status: NOERROR, id: 30973
-    ;; flags: qr; QUERY: 1, ANSWER: 0, AUTHORITY: 0, ADDITIONAL: 1
+  allow-query { any; };
 
-    ;; QUESTION SECTION:
-    ;dyn.qmsk.net.  IN       SOA
+  update-policy {
+    grant *.dyn.example.net self . A AAAA;
+  };
+};
+```
 
-    ;; ADDITIONAL SECTION:
+Configure the referral in the parent zone:
 
-    ;; TSIG PSEUDOSECTION:
-    yzzrt.dyn.qmsk.net.     0       ANY     TSIG     hmac-sha256. 20160619184635 300 32 1F7F1EB8A3D5213EAAA163AE78388D48911495A0F3E2870688F3338160905EC9 30973 0
+```
+ns0     A     ...
+        AAAA  ...
+
+dyn     NS    ns0
+```
