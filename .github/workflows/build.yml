@@ -38,7 +38,7 @@ jobs:
         run: go vet
 
       - name: Upload
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v6
         with:
           name: go-build
           path: ./go-nsupdate
